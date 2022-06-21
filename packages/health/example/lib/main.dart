@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:math';
-
+import "package:collection/collection.dart";
 import 'package:permission_handler/permission_handler.dart';
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:health/health.dart';
 
@@ -24,6 +25,76 @@ enum AppState {
   STEPS_READY,
 }
 
+final androidTypes = [
+  HealthDataType.STEPS,
+  HealthDataType.WEIGHT,
+  HealthDataType.BLOOD_GLUCOSE,
+  HealthDataType.WORKOUT,
+  HealthDataType.ACTIVE_ENERGY_BURNED,
+  HealthDataType.BLOOD_GLUCOSE,
+  HealthDataType.BLOOD_PRESSURE_DIASTOLIC,
+  HealthDataType.BLOOD_PRESSURE_SYSTOLIC,
+  HealthDataType.MOVE_MINUTES, // Android only
+  HealthDataType.DISTANCE_DELTA, // Android only
+  HealthDataType.WORKOUT,
+  HealthDataType.BODY_FAT_PERCENTAGE
+];
+
+// with coresponsing permissions
+final androidPermissions = [
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+];
+
+final iosTypes = [
+  HealthDataType.STEPS,
+  HealthDataType.WEIGHT,
+  HealthDataType.BLOOD_GLUCOSE,
+  HealthDataType.WORKOUT,
+  HealthDataType.ACTIVE_ENERGY_BURNED,
+  HealthDataType.BLOOD_GLUCOSE,
+  HealthDataType.BLOOD_PRESSURE_DIASTOLIC,
+  HealthDataType.BLOOD_PRESSURE_SYSTOLIC,
+  HealthDataType.EXERCISE_TIME, // iOS only
+  HealthDataType.WORKOUT,
+  HealthDataType.BASAL_ENERGY_BURNED, // iOS only
+  HealthDataType.BODY_FAT_PERCENTAGE,
+  HealthDataType.DISTANCE_WALKING_RUNNING // iOS only
+];
+
+// with coresponsing permissions
+final iosPermissions = [
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+  HealthDataAccess.READ,
+];
+
+// TODO: create common data type for iOS and Android
+// TODO: check for duplicates in each platform. Should we aggregate in the app, or in the api?
+// TODO: Do we need to get things like ACTIVE_ENERGY_BURNED when they are also included on an exercise? Does that lead to double counting?
+// How do we pass that to the API? Seems like in the app everything is associated to a workout except for steps.
+// TODO: can we access the data in the background?
+
 class _HealthAppState extends State<HealthApp> {
   List<HealthDataPoint> _healthDataList = [];
   AppState _state = AppState.DATA_NOT_FETCHED;
@@ -37,30 +108,13 @@ class _HealthAppState extends State<HealthApp> {
   Future fetchData() async {
     setState(() => _state = AppState.FETCHING_DATA);
 
-    // define the types to get
-    final types = [
-      HealthDataType.STEPS,
-      HealthDataType.WEIGHT,
-      HealthDataType.HEIGHT,
-      HealthDataType.BLOOD_GLUCOSE,
-      HealthDataType.WORKOUT,
-      // Uncomment these lines on iOS - only available on iOS
-      // HealthDataType.AUDIOGRAM
-    ];
-
-    // with coresponsing permissions
-    final permissions = [
-      HealthDataAccess.READ,
-      HealthDataAccess.READ,
-      HealthDataAccess.READ,
-      HealthDataAccess.READ,
-      HealthDataAccess.READ,
-      // HealthDataAccess.READ,
-    ];
+    var types = Platform.isIOS ? iosTypes : androidTypes;
+    var permissions = Platform.isIOS ? iosPermissions : androidPermissions;
 
     // get data within the last 24 hours
-    final now = DateTime.now();
-    final yesterday = now.subtract(Duration(days: 5));
+    final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
+    final last5Days =
+        DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
     // requesting access to the data types before reading them
     // note that strictly speaking, the [permissions] are not
     // needed, since we only want READ access.
@@ -79,9 +133,36 @@ class _HealthAppState extends State<HealthApp> {
     if (requested) {
       try {
         // fetch health data
-        List<HealthDataPoint> healthData =
-            await health.getHealthDataFromTypes(yesterday, now, types);
+        List<HealthDataPoint> healthData = await health.getHealthDataFromTypes(
+            last5Days, DateTime.now(), types);
         // save all the new data points (only the first 100)
+
+        var itemsByDay =
+            groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
+
+        var itemsByDayAndType = itemsByDay.entries.map((e) {
+          var groupedByType = groupBy(e.value, (HealthDataPoint point) => point.type);
+          var workouts = groupedByType[HealthDataType.WORKOUT];
+          return {
+              e.key: [...groupBy(e.value, (HealthDataPoint point) => point.type)
+                  .entries
+                  .where((e) => e.key != HealthDataType.WORKOUT)
+                  .map((e) => {
+                        e.key: e.value
+                            .map((element) =>
+                                (element.value as NumericHealthValue)
+                                    .numericValue)
+                            .reduce((value, element) => element + value)
+                      }),
+                  ...workouts == null ? [] : workouts
+              ]
+            };
+          });
+
+        itemsByDayAndType.forEach((x) => print(x));
+
+        // healthData.forEach((x) => print(x));
+
         _healthDataList.addAll((healthData.length < 100)
             ? healthData
             : healthData.sublist(0, 100));
@@ -93,7 +174,6 @@ class _HealthAppState extends State<HealthApp> {
       _healthDataList = HealthFactory.removeDuplicates(_healthDataList);
 
       // print the results
-      _healthDataList.forEach((x) => print(x));
 
       // update the UI to display the results
       setState(() {
