@@ -6,8 +6,85 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:health/health.dart';
+// import 'package:workmanager/workmanager.dart';
 
-void main() => runApp(HealthApp());
+HealthFactory health = HealthFactory();
+
+Future fetchData() async {
+  var types = Platform.isIOS ? iosTypes : androidTypes;
+  var permissions = Platform.isIOS ? iosPermissions : androidPermissions;
+
+  // get data within the last 24 hours
+  final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
+  final last5Days = DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
+  // final last5Days =
+  //     DateTime(2022, 7, 12);
+
+    try {
+      // fetch health data
+      List<HealthDataPoint> healthData = await health.getHealthDataFromTypes(
+          last5Days, DateTime.now(), types);
+      // save all the new data points (only the first 100)
+
+      var itemsByDay =
+          groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
+
+      var itemsByDayAndType = itemsByDay.entries.map((e) {
+        var groupedByType = groupBy(e.value, (HealthDataPoint point) => point.type);
+        var workouts = groupedByType[HealthDataType.WORKOUT];
+        return {
+            e.key: [...groupBy(e.value, (HealthDataPoint point) => point.type)
+                .entries
+                .where((e) => e.key != HealthDataType.WORKOUT)
+                .map((e) => {
+                      e.key: e.value
+                          .map((element) =>
+                              (element.value as NumericHealthValue)
+                                  .numericValue)
+                          .reduce((value, element) => element + value)
+                    }),
+                ...workouts == null ? [] : workouts
+            ]
+          };
+        });
+
+      itemsByDayAndType.forEach((x) => print(x));
+
+      // healthData.forEach((x) => print(x));
+    } catch (error) {
+      print("Exception in getHealthDataFromTypes: $error");
+    }
+  }
+
+// @pragma('vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
+// void callbackDispatcher() {
+//   Workmanager().executeTask((task, inputData) async {
+//     print("Native called background task: $task"); //simpleTask will be emitted here.
+//     await fetchData();
+//     return true;
+//   });
+// }
+
+// void main() {
+//   WidgetsFlutterBinding.ensureInitialized();
+//   Workmanager().initialize(
+//     callbackDispatcher, // The top level function, aka callbackDispatcher
+//     isInDebugMode: true // If enabled it will post a notification whenever the task is running. Handy for debugging tasks
+//   );
+//   Workmanager().registerOneOffTask(
+//     "task-identifier",
+//     "simpleTask",
+//     constraints: Constraints(
+//     // connected or metered mark the task as requiring internet
+//     networkType: NetworkType.connected
+//   ));
+//   runApp(HealthApp());
+// }
+
+void main() {
+  runApp(HealthApp());
+}
+
 
 class HealthApp extends StatefulWidget {
   @override
@@ -95,14 +172,35 @@ final iosPermissions = [
 // How do we pass that to the API? Seems like in the app everything is associated to a workout except for steps.
 // TODO: can we access the data in the background?
 
-class _HealthAppState extends State<HealthApp> {
+class _HealthAppState extends State<HealthApp> with WidgetsBindingObserver {
   List<HealthDataPoint> _healthDataList = [];
   AppState _state = AppState.DATA_NOT_FETCHED;
   int _nofSteps = 10;
   double _mgdl = 10.0;
 
   // create a HealthFactory for use in the app
-  HealthFactory health = HealthFactory();
+  late AppLifecycleState _notification;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance?.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance?.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    print(state);
+
+    if(state == AppLifecycleState.resumed) {
+      _notification = state;
+    }
+  }
 
   /// Fetch data points from the health plugin and show them in the app.
   Future fetchData() async {
@@ -112,9 +210,14 @@ class _HealthAppState extends State<HealthApp> {
     var permissions = Platform.isIOS ? iosPermissions : androidPermissions;
 
     // get data within the last 24 hours
-    final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
-    final last5Days =
-        DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
+    // final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
+    // final last5Days = DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
+
+    final yesterday = DateTime.now().subtract(Duration(days: 1));
+    final now = DateTime.now();
+    final yesterday_midnight = DateTime(yesterday.year, yesterday.month, yesterday.day);
+    final today_midnight = DateTime(now.year, now.month, now.day);
+
     // requesting access to the data types before reading them
     // note that strictly speaking, the [permissions] are not
     // needed, since we only want READ access.
@@ -134,17 +237,25 @@ class _HealthAppState extends State<HealthApp> {
       try {
         // fetch health data
         List<HealthDataPoint> healthData = await health.getHealthDataFromTypes(
-            last5Days, DateTime.now(), types);
+            yesterday_midnight, today_midnight, types);
         // save all the new data points (only the first 100)
+
+        // healthData.where((dataPoint) => dataPoint.type == HealthDataType.WORKOUT).forEach((dataPoint) {
+        //   print(dataPoint);
+        // });
+
+        healthData.forEach((dataPoint) {
+          print('${dataPoint.dateFrom}, ${dataPoint.dateTo}, ${dataPoint.type}, ${dataPoint.sourceName}, ${dataPoint.deviceId}, ${dataPoint.sourceId}, ${dataPoint.value}');
+        });
 
         var itemsByDay =
             groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
 
         var itemsByDayAndType = itemsByDay.entries.map((e) {
           var groupedByType = groupBy(e.value, (HealthDataPoint point) => point.type);
-          var workouts = groupedByType[HealthDataType.WORKOUT];
+          var workouts = healthData.where((dataPoint) => dataPoint.type == HealthDataType.WORKOUT);
           return {
-              e.key: [...groupBy(e.value, (HealthDataPoint point) => point.type)
+              e.key: [...groupedByType
                   .entries
                   .where((e) => e.key != HealthDataType.WORKOUT)
                   .map((e) => {
@@ -154,7 +265,7 @@ class _HealthAppState extends State<HealthApp> {
                                     .numericValue)
                             .reduce((value, element) => element + value)
                       }),
-                  ...workouts == null ? [] : workouts
+                  ...workouts.toList()
               ]
             };
           });
@@ -273,14 +384,16 @@ class _HealthAppState extends State<HealthApp> {
     int? steps;
 
     // get steps for today (i.e., since midnight)
+    final yesterday = DateTime.now().subtract(Duration(days: 1));
     final now = DateTime.now();
-    final midnight = DateTime(now.year, now.month, now.day);
+    final yesterday_midnight = DateTime(yesterday.year, yesterday.month, yesterday.day);
+    final today_midnight = DateTime(now.year, now.month, now.day);
 
     bool requested = await health.requestAuthorization([HealthDataType.STEPS]);
 
     if (requested) {
       try {
-        steps = await health.getTotalStepsInInterval(midnight, now);
+        steps = await health.getTotalStepsInInterval(yesterday_midnight, today_midnight);
       } catch (error) {
         print("Caught exception in getTotalStepsInInterval: $error");
       }
