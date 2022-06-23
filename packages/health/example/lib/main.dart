@@ -6,19 +6,16 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:health/health.dart';
-// import 'package:workmanager/workmanager.dart';
+import 'package:workmanager/workmanager.dart';
 
 HealthFactory health = HealthFactory();
 
-Future fetchData() async {
+Future<List<HealthDataPoint>> fetchHealthhData() async {
   var types = Platform.isIOS ? iosTypes : androidTypes;
-  var permissions = Platform.isIOS ? iosPermissions : androidPermissions;
 
   // get data within the last 24 hours
   final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
   final last5Days = DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
-  // final last5Days =
-  //     DateTime(2022, 7, 12);
 
     try {
       // fetch health data
@@ -26,6 +23,7 @@ Future fetchData() async {
           last5Days, DateTime.now(), types);
       // save all the new data points (only the first 100)
 
+      print("fetching health data");
       var itemsByDay =
           groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
 
@@ -48,42 +46,38 @@ Future fetchData() async {
           };
         });
 
+      print("items ${itemsByDayAndType.length}");
       itemsByDayAndType.forEach((x) => print(x));
 
       // healthData.forEach((x) => print(x));
+      return healthData;
     } catch (error) {
       print("Exception in getHealthDataFromTypes: $error");
     }
+    return [];
   }
 
-// @pragma('vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
-// void callbackDispatcher() {
-//   Workmanager().executeTask((task, inputData) async {
-//     print("Native called background task: $task"); //simpleTask will be emitted here.
-//     await fetchData();
-//     return true;
-//   });
-// }
-
-// void main() {
-//   WidgetsFlutterBinding.ensureInitialized();
-//   Workmanager().initialize(
-//     callbackDispatcher, // The top level function, aka callbackDispatcher
-//     isInDebugMode: true // If enabled it will post a notification whenever the task is running. Handy for debugging tasks
-//   );
-//   Workmanager().registerOneOffTask(
-//     "task-identifier",
-//     "simpleTask",
-//     constraints: Constraints(
-//     // connected or metered mark the task as requiring internet
-//     networkType: NetworkType.connected
-//   ));
-//   runApp(HealthApp());
-// }
+@pragma('vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
+void callbackDispatcher() {
+  Workmanager().executeTask((task, inputData) async {
+    print("Native called background task: $task"); //simpleTask will be emitted here.
+    await fetchHealthhData();
+    return Future.value(true);
+  });
+}
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  Workmanager().initialize(
+    callbackDispatcher, // The top level function, aka callbackDispatcher
+    isInDebugMode: true // If enabled it will post a notification whenever the task is running. Handy for debugging tasks
+  );
   runApp(HealthApp());
 }
+
+// void main() {
+//   runApp(HealthApp());
+// }
 
 
 class HealthApp extends StatefulWidget {
@@ -199,102 +193,40 @@ class _HealthAppState extends State<HealthApp> with WidgetsBindingObserver {
 
     if(state == AppLifecycleState.resumed) {
       _notification = state;
+      Workmanager().registerOneOffTask(
+        "task-identifier",
+        "simpleTask",
+        constraints: Constraints(
+        // connected or metered mark the task as requiring internet
+        networkType: NetworkType.connected
+      ));
     }
   }
 
   /// Fetch data points from the health plugin and show them in the app.
   Future fetchData() async {
     setState(() => _state = AppState.FETCHING_DATA);
-
-    var types = Platform.isIOS ? iosTypes : androidTypes;
-    var permissions = Platform.isIOS ? iosPermissions : androidPermissions;
-
-    // get data within the last 24 hours
-    // final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
-    // final last5Days = DateTime(fiveDaysAgo.year, fiveDaysAgo.month, fiveDaysAgo.day);
-
-    final yesterday = DateTime.now().subtract(Duration(days: 1));
-    final now = DateTime.now();
-    final yesterday_midnight = DateTime(yesterday.year, yesterday.month, yesterday.day);
-    final today_midnight = DateTime(now.year, now.month, now.day);
-
-    // requesting access to the data types before reading them
-    // note that strictly speaking, the [permissions] are not
-    // needed, since we only want READ access.
-    bool requested =
-        await health.requestAuthorization(types, permissions: permissions);
-    print('requested: $requested');
-
-    // If we are trying to read Step Count, Workout, Sleep or other data that requires
-    // the ACTIVITY_RECOGNITION permission, we need to request the permission first.
-    // This requires a special request authorization call.
     //
     // The location permission is requested for Workouts using the Distance information.
     await Permission.activityRecognition.request();
     await Permission.location.request();
 
-    if (requested) {
-      try {
-        // fetch health data
-        List<HealthDataPoint> healthData = await health.getHealthDataFromTypes(
-            yesterday_midnight, today_midnight, types);
-        // save all the new data points (only the first 100)
+    var healthData = await fetchHealthhData();
 
-        // healthData.where((dataPoint) => dataPoint.type == HealthDataType.WORKOUT).forEach((dataPoint) {
-        //   print(dataPoint);
-        // });
+      // healthData.forEach((x) => print(x));
 
-        healthData.forEach((dataPoint) {
-          print('${dataPoint.dateFrom}, ${dataPoint.dateTo}, ${dataPoint.type}, ${dataPoint.sourceName}, ${dataPoint.deviceId}, ${dataPoint.sourceId}, ${dataPoint.value}');
-        });
+    _healthDataList.addAll((healthData.length < 100)
+        ? healthData
+        : healthData.sublist(0, 100));
 
-        var itemsByDay =
-            groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
+    // filter out duplicates
+    _healthDataList = HealthFactory.removeDuplicates(_healthDataList);
 
-        var itemsByDayAndType = itemsByDay.entries.map((e) {
-          var groupedByType = groupBy(e.value, (HealthDataPoint point) => point.type);
-          var workouts = healthData.where((dataPoint) => dataPoint.type == HealthDataType.WORKOUT);
-          return {
-              e.key: [...groupedByType
-                  .entries
-                  .where((e) => e.key != HealthDataType.WORKOUT)
-                  .map((e) => {
-                        e.key: e.value
-                            .map((element) =>
-                                (element.value as NumericHealthValue)
-                                    .numericValue)
-                            .reduce((value, element) => element + value)
-                      }),
-                  ...workouts.toList()
-              ]
-            };
-          });
-
-        itemsByDayAndType.forEach((x) => print(x));
-
-        // healthData.forEach((x) => print(x));
-
-        _healthDataList.addAll((healthData.length < 100)
-            ? healthData
-            : healthData.sublist(0, 100));
-      } catch (error) {
-        print("Exception in getHealthDataFromTypes: $error");
-      }
-
-      // filter out duplicates
-      _healthDataList = HealthFactory.removeDuplicates(_healthDataList);
-
-      // print the results
-
-      // update the UI to display the results
-      setState(() {
-        _state =
-            _healthDataList.isEmpty ? AppState.NO_DATA : AppState.DATA_READY;
-      });
-    } else {
-      print("Authorization not granted");
-      setState(() => _state = AppState.DATA_NOT_FETCHED);
-    }
+    // update the UI to display the results
+    setState(() {
+      _state =
+          _healthDataList.isEmpty ? AppState.NO_DATA : AppState.DATA_READY;
+    });
   }
 
   /// Add some random health data.
