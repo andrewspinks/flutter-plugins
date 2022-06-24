@@ -4,6 +4,7 @@ import "package:collection/collection.dart";
 import 'package:permission_handler/permission_handler.dart';
 
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:health/health.dart';
 import 'package:workmanager/workmanager.dart';
@@ -12,6 +13,8 @@ HealthFactory health = HealthFactory();
 
 Future<List<HealthDataPoint>> fetchHealthhData() async {
   var types = Platform.isIOS ? iosTypes : androidTypes;
+
+  print("Fetching health data");
 
   // get data within the last 24 hours
   final fiveDaysAgo = DateTime.now().subtract(Duration(days: 5));
@@ -23,7 +26,7 @@ Future<List<HealthDataPoint>> fetchHealthhData() async {
           last5Days, DateTime.now(), types);
       // save all the new data points (only the first 100)
 
-      print("fetching health data");
+      print("heath data retrieved");
       var itemsByDay =
           groupBy(healthData, (HealthDataPoint point) => point.dateFrom.day);
 
@@ -60,6 +63,10 @@ Future<List<HealthDataPoint>> fetchHealthhData() async {
 @pragma('vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    DartPluginRegistrant.ensureInitialized(); // https://github.com/flutter/flutter/issues/98473#issuecomment-1060952450
+    // Still getting these errors, even when setting the above:
+    // Exception in getHealthDataFromTypes: MissingPluginException(No implementation found for method getIosDeviceInfo on channel dev.fluttercommunity.plus/device_info)
+
     print("Native called background task: $task"); //simpleTask will be emitted here.
     await fetchHealthhData();
     return Future.value(true);
