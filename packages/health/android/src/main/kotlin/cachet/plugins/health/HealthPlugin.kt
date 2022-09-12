@@ -50,6 +50,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
   private var STEPS = "STEPS"
   private var AGGREGATE_STEP_COUNT = "AGGREGATE_STEP_COUNT"
   private var ACTIVE_ENERGY_BURNED = "ACTIVE_ENERGY_BURNED"
+  private var BASAL_ENERGY_BURNED = "BASAL_ENERGY_BURNED"
   private var HEART_RATE = "HEART_RATE"
   private var BODY_TEMPERATURE = "BODY_TEMPERATURE"
   private var BLOOD_PRESSURE_SYSTOLIC = "BLOOD_PRESSURE_SYSTOLIC"
@@ -260,6 +261,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       STEPS -> DataType.TYPE_STEP_COUNT_DELTA
       AGGREGATE_STEP_COUNT -> DataType.AGGREGATE_STEP_COUNT_DELTA
       ACTIVE_ENERGY_BURNED -> DataType.TYPE_CALORIES_EXPENDED
+      BASAL_ENERGY_BURNED -> DataType.TYPE_BASAL_METABOLIC_RATE
       HEART_RATE -> DataType.TYPE_HEART_RATE_BPM
       BODY_TEMPERATURE -> HealthDataTypes.TYPE_BODY_TEMPERATURE
       BLOOD_PRESSURE_SYSTOLIC -> HealthDataTypes.TYPE_BLOOD_PRESSURE
@@ -284,6 +286,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       WEIGHT -> Field.FIELD_WEIGHT
       STEPS -> Field.FIELD_STEPS
       ACTIVE_ENERGY_BURNED -> Field.FIELD_CALORIES
+      BASAL_ENERGY_BURNED -> Field.FIELD_CALORIES
       HEART_RATE -> Field.FIELD_BPM
       BODY_TEMPERATURE -> HealthFields.FIELD_BODY_TEMPERATURE
       BLOOD_PRESSURE_SYSTOLIC -> HealthFields.FIELD_BLOOD_PRESSURE_SYSTOLIC
@@ -620,6 +623,7 @@ class HealthPlugin(private var channel: MethodChannel? = null) : MethodCallHandl
       val dataSet = response.getDataSet(dataType)
       /// For each data point, extract the contents and send them to Flutter, along with date and unit.
       val healthData = dataSet.dataPoints.mapIndexed { _, dataPoint ->
+//        Log.i("FLUTTER_HEALTH:DP", dataPoint.toString());
         return@mapIndexed hashMapOf(
           "value" to getHealthDataValue(dataPoint, field),
           "date_from" to dataPoint.getStartTime(TimeUnit.MILLISECONDS),
